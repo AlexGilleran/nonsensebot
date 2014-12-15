@@ -1,4 +1,4 @@
 tunnelsnake
 ===========
 
-Tunnel stakes rule!
+Tunnel snakes rule!
