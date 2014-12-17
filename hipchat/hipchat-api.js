@@ -1,14 +1,27 @@
-var Client = require('node-rest-client').Client;
-
-var client = new Client();
-
-client.registerMethod("getHistory", "https://api.hipchat.com/v2/room/${roomId}/history", "GET");
+var URI = require('URIjs');
+var URITemplate = require('URIjs/src/URITemplate');
+var request = require('cogent');
 
 var Hipchat = function() {
-  this.getHistoryForRoom = function(roomId, date, successCb, failureCb, startIndex, size) {
-    startIndex = startIndex || 0;
+  var historyTemplate = new URITemplate("https://api.hipchat.com/v2/room/{roomId}/history{?q*}");
 
-    client.methods.getHistory(buildArgs(roomId, date, startIndex, size), onMessagesResponse(successCb, roomId)).on("error", failureCb);
+  this.getHistoryForRoom = function * (roomId, date, startIndex, size) {
+    startIndex = startIndex || 0;
+    var uri = historyTemplate.expand({
+      roomId: roomId,
+      q: {
+        "auth_token": process.env.AUTH_TOKEN,
+        "date": date,
+        "start-index": startIndex,
+        "max-results": size
+      }
+    });
+
+    var res = yield * request(uri, true);
+
+    console.log(res.body);
+
+    return res.body;
   };
 
   function onMessagesResponse(successCb, roomId) {
@@ -20,24 +33,10 @@ var Hipchat = function() {
       successCb({
         messages: data.items,
         startIndex: data.startIndex,
-        more: !!data.links.next
+        more: !! data.links.next
       });
     };
-  };
-
-  function buildArgs(roomId, date, startIndex, size) {
-    return {
-      path: {
-        roomId: roomId
-      },
-      parameters: {
-        "auth_token": process.env.AUTH_TOKEN,
-        "date": date,
-        "start-index": startIndex,
-        "max-results": size
-      }
-    };
-  };
+  }
 };
 
 module.exports = Hipchat;

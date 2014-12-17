@@ -1,2 +1,2 @@
-web: node app.js
-web-debug: node-debug app.js
+web: node --harmony app.js
+web-debug: node-debug --harmony app.js
