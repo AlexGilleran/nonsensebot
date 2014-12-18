@@ -10,10 +10,11 @@ var PAGE_SIZE = 1000;
 
 module.exports = function(app) {
   app.use(route.get('/load/latestMessage', latestMessage));
-  app.use(route.get('/load/history', history));
+  app.use(route.get('/load/fetch', fetch));
+  app.use(route.get('/load/index', index));
 };
 
-function* latestMessage() {
+function * latestMessage() {
   var message = yield db.getLatestMessage(this.request.query.roomId);
 
   if (message) {
@@ -23,80 +24,87 @@ function* latestMessage() {
   }
 }
 
-function* history() {
-  var messagesJson = yield hipchat.getHistoryForRoom(this.request.query.roomId, new Date().toISOString(), 0, 100);
+function * fetch() {
+  var hasNext = true;
+  var offset = 0;
+  var counter = 0;
 
-  if (messagesJson) {
-    this.body = messagesJson;
-  } else {
-    throw new Error("no messages punk.");
+  while (hasNext) {
+    var history = yield hipchat.getHistoryForRoom(this.request.query.roomId, new Date().toISOString(), offset, PAGE_SIZE);
+    offset += PAGE_SIZE;
+
+    if (history.items) {
+      yield db.insertMessages(history.items);
+      counter += history.items.length;
+    }
+
+    hasNext = history.items.length === PAGE_SIZE;
+    console.log("inserted " + counter + " items");
+
+    yield setTimeoutThunk(5000);
   }
+
+  this.body = "inserted " + counter + " items";
 }
 
+function * index() {
+  var offset = 0;
 
-// router.get('/put', function(request, response) {
-//   db.insertMessages([message1, message2], function() {
-//     response.send("Inserted!");
-//   }, onError.bind(this, response));
-// });
+  var totalMessages = yield db.countMessages();
 
-// router.get('/before/:date', function(request, response) {
-//   var date = request.param("date") || new Date().toISOString();
-//   var roomId = request.query.roomId;
-//   var insertCount = 0;
-//   var finished = false;
+  var indexingFuncs = [];
+  while (offset < totalMessages) {
+    indexingFuncs.push(indexChunk(offset));
 
-//   if (!roomId) {
-//     response.send("SET A ROOM ID!!!");
-//     return;
-//   }
+    offset += PAGE_SIZE;
+  }
 
-//   db.getLatestMessage(roomId, afterLatest, onFailure);
+  yield indexingFuncs;
 
-//   function afterLatest(message) {
-//     var latestMessageId = message ? message.id : null;
+  this.body = "indexed " + totalMessages + " messages";
+}
 
-//     hipchat.getHistoryForRoom(roomId, date, onHipchatSuccess(latestMessageId), onFailure, 0, PAGE_SIZE);
-//   }
+function indexChunk (offset) {
+  return function * () {
+    var messages = yield db.getMessages(offset, PAGE_SIZE);
 
-//   function onHipchatSuccess(latestMessageId) {
-//     return function(data) {
-//       console.log("Retrieved " + data.messages.length + " messages successfully.");
-//       var latestMessageIndex = -1;
+    var insertFuncs = [];
+    for (var i = 0; i < messages.length; i++) {
+      var message = messages[i];
 
-//       if (latestMessageId) {
-//         latestMessageIndex = _.findLastIndex(data.messages, function(message) {
-//           return message.id === latestMessageId;
-//         });
-//       }
+      if (message.message) {
+        // console.log(JSON.stringify(getWordPairs(message.message)) + " " + message.id);
+        insertFuncs.push(insertChunk(getWordPairs(message.message), message.id));
+      }
+    }
 
-//       if (data.more && latestMessageIndex === -1) {
-//         hipchat.getHistoryForRoom(roomId, date, onHipchatSuccess, onFailure, data.startIndex + data.messages.count, PAGE_SIZE);
-//       } else {
-//         if (latestMessageIndex !== -1) {
-//           data.messages = data.messages.slice(latestMessageIndex);
-//         }
+    yield insertFuncs;
+  };
+}
 
-//         finished = true;
-//       }
+function insertChunk(wordPairs, messageId) {
+  return function * () {
+    yield db.insertWordPairs(wordPairs, messageId);
+  };
+}
 
-//       db.insertMessages(data.messages, onDbInsertSuccess, onFailure);
-//     };
-//   }
+function getWordPairs(messageText) {
+  var pairs = [];
+  var words = messageText.split(" ");
 
-//   function onDbInsertSuccess(messages) {
-//     return function() {
-//       insertCount += messages.length;
-//       console.log("Inserted " + insertCount + " rows successfully so far.");
+  if (words.length < 2) {
+    return [];
+  }
 
-//       if (finished) {
-//         response.send("Inserted " + insertCount + " rows");
-//       }
-//     };
-//   }
+  for (var i = 0; i < words.length - 1; i++) {
+    pairs.push([words[i], words[i + 1]]);
+  }
 
-//   function onFailure(err) {
-//     console.error(err);
-//     response.send("Inserted " + insertCount + " rows." + err);
-//   }
-// });
+  return pairs;
+}
+
+function setTimeoutThunk(ms) {
+  return function(cb) {
+    setTimeout(cb, ms);
+  };
+}

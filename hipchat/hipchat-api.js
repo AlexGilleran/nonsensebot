@@ -17,26 +17,16 @@ var Hipchat = function() {
       }
     });
 
-    var res = yield * request(uri, true);
+    var res = yield * request(uri, {
+      json: true
+    });
 
-    console.log(res.body);
+    res.body.items.forEach(function(item) {
+      item.roomId = roomId;
+    });
 
     return res.body;
   };
-
-  function onMessagesResponse(successCb, roomId) {
-    return function(data, response) {
-      data.items.forEach(function(item) {
-        item.roomId = roomId;
-      });
-
-      successCb({
-        messages: data.items,
-        startIndex: data.startIndex,
-        more: !! data.links.next
-      });
-    };
-  }
 };
 
 module.exports = Hipchat;

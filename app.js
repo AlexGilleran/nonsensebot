@@ -7,6 +7,7 @@ app.use(logger());
 
 require('./routes/index')(app);
 require('./routes/load')(app);
+require('./routes/bot')(app);
 
 // app.on('error', function(err){
 //   if (process.env.NODE_ENV != 'test') {
