@@ -13,63 +13,27 @@ module.exports = function(app) {
 };
 
 function * randomMessage() {
-  if (!messageCache) {
-    yield buildMessageCache();
+  var currentPair = yield db.getRandomWordPair();
+
+  var messageSoFar = currentPair[0] + " " + currentPair[1];
+
+  var currentValue = yield getForPair(currentPair);
+  var count = 0;
+  while (currentValue && count < 100) {
+    messageSoFar += " " + currentValue;
+
+    currentPair.shift();
+    currentPair.push(currentValue);
+
+    currentValue = yield getForPair(currentPair);
+    count++;
   }
 
-  var currentPair = getRandomStart();
-  var message = currentPair;
-  var currentValue = getForPair(currentPair);
-  while (currentValue) {
-    message += " " + currentValue;
-
-    var messageArr = message.split(" ");
-    var lastIndex = messageArr.length - 1;
-    currentPair = messageArr[lastIndex - 1] + " " + messageArr[lastIndex];
-
-    currentValue = getForPair(currentPair);
-  }
-
-  if (message) {
-    this.body = message;
+  if (messageSoFar) {
+    this.body = messageSoFar;
   } else {
-    throw new Error("Couldn't generate a message.");
+    throw new Error("Couldn't generate a messageSoFar.");
   }
-}
-
-function * buildMessageCache() {
-  var messages = yield db.getAllMessages();
-
-  messageCache = {};
-
-  messages.forEach(function(message) {
-    if (!message.message) {
-      return true;
-    }
-
-    var words = message.message.split(" ");
-
-    if (words.length < 3) {
-      return true;
-    }
-
-    for (var i = 0; i < words.length - 2; i++) {
-      var pair = words[i] + " " + words[i + 1];
-      var word = words[i + 2];
-
-      if (!messageCache[pair]) {
-        messageCache[pair] = {};
-      }
-
-      if (!messageCache[pair][word]) {
-        messageCache[pair][word] = 0;
-      }
-
-      messageCache[pair][word] += 1;
-    }
-  });
-
-  keys = Object.keys(messageCache);
 }
 
 function getRandomStart() {
@@ -77,12 +41,17 @@ function getRandomStart() {
   return keys[index];
 }
 
-function getForPair(pair) {
-  var resultArr = [];
+function* getForPair(pair) {
+  var possibleWords = yield db.getNextWords(pair[0], pair[1]);
 
-  _.pairs(messageCache[pair]).forEach(function(pairArray) {
-    for (var i = 0; i < pairArray[1]; i++) {
-      resultArr.push(pairArray[0]);
+  if (!possibleWords) {
+    return null;
+  }
+
+  var resultArr = [];
+  possibleWords.forEach(function(possibility) {
+    for (var i = 0; i < possibility.count; i++) {
+      resultArr.push(possibility.word);
     }
   });
 

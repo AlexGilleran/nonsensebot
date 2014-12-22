@@ -84,6 +84,10 @@ function indexChunk (offset) {
 
 function insertChunk(wordPairs, messageId) {
   return function * () {
+    wordPairs = _.filter(wordPairs, function(wordPair) {
+      return !!wordPair[0] && !!wordPair[1];
+    });
+
     yield db.insertWordPairs(wordPairs, messageId);
   };
 }
