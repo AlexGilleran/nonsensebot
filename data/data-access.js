@@ -12,10 +12,8 @@ var GET_NEXT_WORDS_SQL = "SELECT word2.word, count(word2.word) as \"count\" " +
   "INNER JOIN word AS \"word2\" ON word2.preceding_word = word1.word AND word1.message_id = word2.message_id " +
   "WHERE word1.preceding_word = $1 AND word1.word = $2 " +
   "GROUP BY word2.word ORDER BY \"count\" DESC;";
-var GET_RANDOM_WORDS_SQL = "SELECT word2.preceding_word, word2.word " + 
-  "FROM word as word1 " + 
-  "INNER JOIN word as word2 ON word2.preceding_word = word1.word AND word1.message_id = word2.message_id " +
-  "LIMIT 1 OFFSET (SELECT floor(random()* (SELECT COUNT(*) FROM word)));";
+var GET_WORDS_PREFIX = "SELECT preceding_word, word, COUNT(preceding_word) AS count FROM word WHERE ";
+var GET_WORDS_SUFFIX = "GROUP BY preceding_word, word;";
 
 var Data = function() {
   this.getLatestMessage = function * (roomId) {
@@ -62,28 +60,39 @@ var Data = function() {
     }
   };
 
-  this.getRandomWordPair = function * () {
-    var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
-    var client = connResults[0];
-    var done = connResults[1];
-
-    var result = yield client.queryPromise(GET_RANDOM_WORDS_SQL);
-
-    done();
-
-    if (!result.rows || result.rows.length === 0) {
-      return null;
-    } else {
-      return [result.rows[0].preceding_word, result.rows[0].word];
-    }
-  };
-
   this.getNextWords = function * (word1, word2) {
     var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
     var client = connResults[0];
     var done = connResults[1];
 
     var result = yield client.queryPromise(GET_NEXT_WORDS_SQL, [word1, word2]);
+
+    done();
+
+    if (!result.rows || !result.rows.length) {
+      return null;
+    } else {
+      return result.rows;
+    }
+  };
+
+  this.getWordPairCounts = function * (words) {
+   var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
+    var client = connResults[0];
+    var done = connResults[1];
+
+    var sql = GET_WORDS_PREFIX;
+    for (var i = 1; i < words.length; i++) {
+      sql += "(preceding_word = $" + i +  " OR word = $" + (i + 1) + ") ";
+
+      if (i < words.length - 1) {
+        sql += "OR ";
+      }
+    }
+    sql += GET_WORDS_SUFFIX;
+    var result = yield client.queryPromise(sql, words);
+
+    console.log(words);
 
     done();
 

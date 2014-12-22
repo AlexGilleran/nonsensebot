@@ -13,7 +13,16 @@ module.exports = function(app) {
 };
 
 function * randomMessage() {
-  var currentPair = yield db.getRandomWordPair();
+  if (!this.request.query.message) {
+    throw new Error("pass a message in the query string");
+  }
+
+  var currentPair = yield getStart(this.request.query.message);
+
+  if (!currentPair) {
+    this.body = "Say what?";
+    return;
+  }
 
   var messageSoFar = currentPair[0] + " " + currentPair[1];
 
@@ -34,6 +43,42 @@ function * randomMessage() {
   } else {
     throw new Error("Couldn't generate a messageSoFar.");
   }
+}
+
+function * getStart(message) {
+  var words = message.split(" ");
+
+  var wordPairCounts = yield db.getWordPairCounts(words);
+
+  if (!wordPairCounts) {
+    return null;
+  }
+
+  var _wordPairCounts = _(wordPairCounts);
+  var total = _wordPairCounts.reduce(function(soFar, wordPair) {
+    return soFar += parseInt(wordPair.count);
+  }, 0);
+
+  var inverseTotal = 0;
+  wordPairCounts.forEach(function(wordPair) {
+    wordPair.inverseCount = total - wordPair.count;
+    inverseTotal += wordPair.inverseCount;
+  }, 0);
+
+  var choice = _.random(0, inverseTotal);
+
+  console.log(wordPairCounts);
+
+  var currentIndex = 0;
+  var chosenWordPair = _wordPairCounts.find(function(wordPair) {
+    currentIndex += wordPair.inverseCount;
+
+    if (choice <= currentIndex) {
+      return wordPair;
+    }
+  });
+
+  return [chosenWordPair.preceding_word, chosenWordPair.word];
 }
 
 function getRandomStart() {
