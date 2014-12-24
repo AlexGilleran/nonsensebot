@@ -1,7 +1,12 @@
+/*jshint loopfunc: true */
+
 var Data = require("../data/data-access");
 var Hipchat = require("../hipchat/hipchat-api");
 var _ = require("lodash");
 var route = require('koa-route');
+var co = require("co");
+
+var MAX_LENGTH = 30;
 
 var db = new Data();
 
@@ -13,22 +18,131 @@ module.exports = function(app) {
 };
 
 function * randomMessage() {
+  console.log("===");
   if (!this.request.query.message) {
     throw new Error("pass a message in the query string");
   }
 
-  var currentPair = yield getStart(this.request.query.message);
+  var startWords = yield getStart(this.request.query.message);
 
-  if (!currentPair) {
+  if (!startWords) {
     this.body = "Say what?";
     return;
   }
 
-  var messageSoFar = currentPair[0] + " " + currentPair[1];
+  var startWord = startWords[0].word;
+  var funcs = [
 
+    function * () {
+      return yield getMarkov(startWord);
+    }
+  ];
+
+  console.log(startWords);
+
+  if (startWords.length > 1) {
+    var seekingWord = startWords[1].word;
+    funcs.push(function * () {
+      var result = yield getWithPathFinding(startWord, seekingWord, {});
+      if (result) {
+        return result.join(" ");
+      }
+    });
+  }
+
+  var results = yield funcs;
+
+  console.log(results);
+
+  var message;
+
+  if (results.length > 1 && results[1]) {
+    message = results[1];
+  } else {
+    message = results[0];
+  }
+
+  if (message) {
+    this.body = message;
+  } else {
+    throw new Error("Couldn't generate a messageSoFar.");
+  }
+}
+
+function * getStart(message) {
+  var words = message.split(" ");
+
+  return yield db.getStartingWords(words);
+}
+
+function getRandomStart() {
+  var index = Math.floor(Math.random() * keys.length);
+  return keys[index];
+}
+
+var count = 0;
+
+function * getWithPathFinding(startWord, seekingWord, cache) {
+  if (!cache[startWord]) {
+    cache[startWord] = co(function * () {
+      if (startWord === seekingWord) {
+        return [seekingWord];
+      }
+
+      var possibilities = yield db.getNextWords(undefined, startWord);
+      if (!possibilities || !possibilities.length) {
+        return;
+      }
+
+      console.log(possibilities);
+
+      var funcs = [];
+      for (var i = 0; i < possibilities.length; i++) {
+        var possibility = possibilities[i].word;
+
+        funcs.push(co(function * () {
+          return yield getWithPathFinding(possibility, seekingWord, cache);
+        }));
+      }
+
+      var results = yield funcs;
+      results.forEach(function(thisResult) {
+        if (thisResult && thisResult.length && thisResult[0]) {
+          result = thisResult;
+        }
+      });
+
+      if (result) {
+        return [startWord].concat(result);
+      }
+
+      return null;
+    });
+  } else {
+    cache[startWord].then(function() {
+      console.log("YAAARGGH");
+    });
+    //FIXME: For some reason we can't yield to a fulfilled promise.
+    return;
+  }
+
+
+  var result = yield cache[startWord];
+
+  if (result && result.length < MAX_LENGTH) {
+    return result;
+  }
+
+  return null;
+}
+
+function * getMarkov(startWord) {
+  console.log("markoving " + startWord);
+  var messageSoFar = startWord;
+  var currentPair = [undefined, startWord];
   var currentValue = yield getForPair(currentPair);
   var count = 0;
-  while (currentValue && count < 100) {
+  while (currentValue && count < MAX_LENGTH) {
     messageSoFar += " " + currentValue;
 
     currentPair.shift();
@@ -38,55 +152,10 @@ function * randomMessage() {
     count++;
   }
 
-  if (messageSoFar) {
-    this.body = messageSoFar;
-  } else {
-    throw new Error("Couldn't generate a messageSoFar.");
-  }
+  return messageSoFar;
 }
 
-function * getStart(message) {
-  var words = message.split(" ");
-
-  var wordPairCounts = yield db.getWordPairCounts(words);
-
-  if (!wordPairCounts) {
-    return null;
-  }
-
-  var _wordPairCounts = _(wordPairCounts);
-  var total = _wordPairCounts.reduce(function(soFar, wordPair) {
-    return soFar += parseInt(wordPair.count);
-  }, 0);
-
-  var inverseTotal = 0;
-  wordPairCounts.forEach(function(wordPair) {
-    wordPair.inverseCount = total - wordPair.count;
-    inverseTotal += wordPair.inverseCount;
-  }, 0);
-
-  var choice = _.random(0, inverseTotal);
-
-  console.log(wordPairCounts);
-
-  var currentIndex = 0;
-  var chosenWordPair = _wordPairCounts.find(function(wordPair) {
-    currentIndex += wordPair.inverseCount;
-
-    if (choice <= currentIndex) {
-      return wordPair;
-    }
-  });
-
-  return [chosenWordPair.preceding_word, chosenWordPair.word];
-}
-
-function getRandomStart() {
-  var index = Math.floor(Math.random() * keys.length);
-  return keys[index];
-}
-
-function* getForPair(pair) {
+function * getForPair(pair) {
   var possibleWords = yield db.getNextWords(pair[0], pair[1]);
 
   if (!possibleWords) {

@@ -7,13 +7,17 @@ String.prototype.surround = function(surroundWith) {
 
 var INSERT_MESSAGE_SQL = "INSERT INTO messages (\"from\", message, date, message_id, room_id) VALUES ($1, $2, $3, $4, $5);";
 var INSERT_WORD_SQL = "INSERT INTO word(word, preceding_word, message_id) VALUES ($1, $2, $3);";
-var GET_NEXT_WORDS_SQL = "SELECT word2.word, count(word2.word) as \"count\" " +  
+var GET_NEXT_WORDS_FROM_PAIR_SQL = "SELECT word2.word, count(word2.word) as \"count\" " +
   "FROM word AS \"word1\" " +
   "INNER JOIN word AS \"word2\" ON word2.preceding_word = word1.word AND word1.message_id = word2.message_id " +
   "WHERE word1.preceding_word = $1 AND word1.word = $2 " +
   "GROUP BY word2.word ORDER BY \"count\" DESC;";
-var GET_WORDS_PREFIX = "SELECT preceding_word, word, COUNT(preceding_word) AS count FROM word WHERE ";
-var GET_WORDS_SUFFIX = "GROUP BY preceding_word, word;";
+var GET_NEXT_WORDS_FROM_SINGLE_SQL = "SELECT word, count(word) as \"count\" " +
+  "FROM word " +
+  "WHERE preceding_word = $1 " +
+  "GROUP BY word ORDER BY \"count\" DESC;";
+var GET_LEAST_COMMON_PREFIX = "SELECT word, COUNT(word) AS count FROM word WHERE ";
+var GET_LEAST_COMMON_SUFFIX = "GROUP BY word ORDER BY count ASC;";
 
 var Data = function() {
   this.getLatestMessage = function * (roomId) {
@@ -32,7 +36,7 @@ var Data = function() {
     }
   };
 
-  this.countMessages = function* () {
+  this.countMessages = function * () {
     var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
     var client = connResults[0];
     var done = connResults[1];
@@ -65,7 +69,12 @@ var Data = function() {
     var client = connResults[0];
     var done = connResults[1];
 
-    var result = yield client.queryPromise(GET_NEXT_WORDS_SQL, [word1, word2]);
+    var result;
+    if (word1) {
+      result = yield client.queryPromise(GET_NEXT_WORDS_FROM_PAIR_SQL, [word1, word2]);
+    } else {
+      result = yield client.queryPromise(GET_NEXT_WORDS_FROM_SINGLE_SQL, [word2]);
+    }
 
     done();
 
@@ -76,23 +85,22 @@ var Data = function() {
     }
   };
 
-  this.getWordPairCounts = function * (words) {
-   var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
+  this.getStartingWords = function * (words) {
+    var connResults = yield pg.connectPromise(process.env.DATABASE_URL);
     var client = connResults[0];
     var done = connResults[1];
 
-    var sql = GET_WORDS_PREFIX;
-    for (var i = 1; i < words.length; i++) {
-      sql += "(preceding_word = $" + i +  " OR word = $" + (i + 1) + ") ";
+    var sql = GET_LEAST_COMMON_PREFIX;
+    for (var i = 1; i <= words.length; i++) {
+      sql += "(word = $" + (i) + ") ";
 
-      if (i < words.length - 1) {
+      if (i < words.length) {
         sql += "OR ";
       }
     }
-    sql += GET_WORDS_SUFFIX;
-    var result = yield client.queryPromise(sql, words);
+    sql += GET_LEAST_COMMON_SUFFIX;
 
-    console.log(words);
+    var result = yield client.queryPromise(sql, words);
 
     done();
 
