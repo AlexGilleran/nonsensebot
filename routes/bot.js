@@ -57,6 +57,10 @@ function * getMessage(message) {
 
   var tables = yield buildMessageTables(words);
 
+  if (!tables) {
+    return "No idea.";
+  }
+
   words = _.filter(words, function(word) {
     if (excludeLookup[word]) {
       return false;
@@ -133,6 +137,10 @@ function getForPair(pair, messageTable, targetWords) {
 
 function * buildMessageTables(startWords) {
   var messages = yield db.getMessagesWithWords(startWords);
+
+  if (!messages) {
+    return null; 
+  }
 
   forwardTable = {};
   backwardTable = {};
